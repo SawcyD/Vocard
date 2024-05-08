@@ -96,8 +96,10 @@ class Vocard(commands.Bot):
         print(f"Python Version: {sys.version}")
         print("------------------")
 
+        await self.tree.sync()
         func.tokens.client_id = self.user.id
         func.LOCAL_LANGS.clear()
+
 
     async def on_command_error(self, ctx: commands.Context, exception, /) -> None:
         error = getattr(exception, 'original', exception)

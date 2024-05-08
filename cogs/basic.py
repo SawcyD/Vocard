@@ -26,6 +26,7 @@ import discord, voicelink, re
 from io import StringIO
 from discord import app_commands
 from discord.ext import commands
+from discord.ext.commands import Context
 from function import (
     settings,
     send,
@@ -86,6 +87,17 @@ class Basic(commands.Cog):
 
     async def cog_unload(self) -> None:
         self.bot.tree.remove_command(self.ctx_menu.name, type=self.ctx_menu.type)
+
+
+    def has_any_of_roles(*role_ids):
+        def predicate(ctx):
+        # Check if any of the user's roles match the required role IDs
+            if any(role.id in role_ids for role in ctx.author.roles):
+                return True
+            else:
+                # If the user does not have the required role, raise an error
+                raise commands.MissingAnyRole(role_ids)
+        return commands.check(predicate)
 
     async def help_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
         return [app_commands.Choice(name=c.capitalize(), value=c) for c in self.bot.cogs if c not in ["Nodes", "Task"] and current in c]
@@ -327,12 +339,9 @@ class Basic(commands.Cog):
         if not player.is_privileged(ctx.author):
             if ctx.author in player.pause_votes:
                 return await send(ctx, "voted", ephemeral=True)
-            else:
-                player.pause_votes.add(ctx.author)
-                if len(player.pause_votes) >= (required := player.required()):
-                    pass
-                else:
-                    return await send(ctx, "pauseVote", ctx.author, len(player.pause_votes), required)
+            player.pause_votes.add(ctx.author)
+            if len(player.pause_votes) < (required := player.required()):
+                return await send(ctx, "pauseVote", ctx.author, len(player.pause_votes), required)
 
         await player.set_pause(True, ctx.author)
         player.pause_votes.clear()
@@ -365,6 +374,7 @@ class Basic(commands.Cog):
 
     @commands.hybrid_command(name="skip", aliases=get_aliases("skip"))
     @app_commands.describe(index="Enter a index that you want to skip to.")
+    @commands.check_any(has_any_of_roles(1212272788967129148, 1231487319622811749))
     @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
     async def skip(self, ctx: commands.Context, index: int = 0):
         "Skips to the next song or skips to the specified song."
@@ -382,9 +392,7 @@ class Basic(commands.Cog):
                 return await send(ctx, "voted", ephemeral=True)
             else:
                 player.skip_votes.add(ctx.author)
-                if len(player.skip_votes) >= (required := player.required()):
-                    pass
-                else:
+                if len(player.skip_votes) < (required := player.required()):
                     return await send(ctx, "skipVote", ctx.author, len(player.skip_votes), required)
 
         if not player.node._available:
@@ -397,7 +405,7 @@ class Basic(commands.Cog):
 
         if player.queue._repeat.mode == voicelink.LoopType.track:
             await player.set_repeat(voicelink.LoopType.off.name)
-            
+
         await player.stop()
 
     @commands.hybrid_command(name="back", aliases=get_aliases("back"))
@@ -484,10 +492,10 @@ class Basic(commands.Cog):
         player: voicelink.Player = ctx.guild.voice_client
         if not player:
             return await send(ctx, "noPlayer", ephemeral=True)
-        
+
         if not player.is_user_join(ctx.author):
             return await send(ctx, "notInChannel", ctx.author.mention, player.channel.mention, ephemeral=True)
-        
+
         if player.queue.is_empty and not player.current:
             return await send(ctx, "noTrackPlaying", ephemeral=True)
 
@@ -505,18 +513,10 @@ class Basic(commands.Cog):
                 raw += ","
             total_length += track.length
 
-        temp = "!Remember do not change this file!\n------------->Info<-------------\nGuild: {} ({})\nRequester: {} ({})\nTracks: {} - {}\n------------>Tracks<------------\n".format(
-            ctx.guild.name, ctx.guild.id,
-            ctx.author.display_name, ctx.author.id,
-            len(tracks), ctime(total_length)
-        ) + temp
+        temp = f"!Remember do not change this file!\n------------->Info<-------------\nGuild: {ctx.guild.name} ({ctx.guild.id})\nRequester: {ctx.author.display_name} ({ctx.author.id})\nTracks: {len(tracks)} - {ctime(total_length)}\n------------>Tracks<------------\n{temp}"
         temp += raw
 
         await ctx.reply(content="", file=discord.File(StringIO(temp), filename=f"{ctx.guild.id}_Full_Queue.txt"))
-
-    @queue.command(name="import", aliases=get_aliases("import"))
-    @commands.dynamic_cooldown(cooldown_check, commands.BucketType.guild)
-    async def _import(self, ctx: commands.Context, attachment: discord.Attachment):
         "Imports the text file and adds the track to the current queue."
         player: voicelink.Player = ctx.guild.voice_client
         if not player:
@@ -897,6 +897,81 @@ class Basic(commands.Cog):
             )
 
         await ctx.send(embed=embed)
+
+    @commands.command(
+        name="sync",
+        description="Synchonizes the slash commands.",
+    )
+    @app_commands.describe(scope="The scope of the sync. Can be `global` or `guild`")
+    @commands.is_owner()  # Place your guild ID here
+    async def sync(self, context: Context, scope: str) -> None:
+        """
+        Synchonizes the slash commands.
+
+        :param context: The command context.
+        :param scope: The scope of the sync. Can be `global` or `guild`.
+        """
+
+        if scope == "global":
+            await context.bot.tree.sync()
+            embed = discord.Embed(
+                description="Slash commands have been globally synchronized.",
+                color=0xBEBEFE,
+            )
+            await context.send(embed=embed)
+            return
+        elif scope == "guild":
+            context.bot.tree.copy_global_to(guild=context.guild)
+            await context.bot.tree.sync(guild=context.guild)
+            embed = discord.Embed(
+                description="Slash commands have been synchronized in this guild.",
+                color=0xBEBEFE,
+            )
+            await context.send(embed=embed)
+            return
+        embed = discord.Embed(
+            description="The scope must be `global` or `guild`.", color=0xE02B2B
+        )
+        await context.send(embed=embed)
+
+    @commands.command(
+        name="unsync",
+        description="Unsynchonizes the slash commands.",
+    )
+    @app_commands.describe(
+        scope="The scope of the sync. Can be `global`, `current_guild` or `guild`"
+    )
+    @commands.is_owner()
+    async def unsync(self, context: Context, scope: str) -> None:
+        """
+        Unsynchonizes the slash commands.
+
+        :param context: The command context.
+        :param scope: The scope of the sync. Can be `global`, `current_guild` or `guild`.
+        """
+
+        if scope == "global":
+            context.bot.tree.clear_commands(guild=None)
+            await context.bot.tree.sync()
+            embed = discord.Embed(
+                description="Slash commands have been globally unsynchronized.",
+                color=0xBEBEFE,
+            )
+            await context.send(embed=embed)
+            return
+        elif scope == "guild":
+            context.bot.tree.clear_commands(guild=context.guild)
+            await context.bot.tree.sync(guild=context.guild)
+            embed = discord.Embed(
+                description="Slash commands have been unsynchronized in this guild.",
+                color=0xBEBEFE,
+            )
+            await context.send(embed=embed)
+            return
+        embed = discord.Embed(
+            description="The scope must be `global` or `guild`.", color=0xE02B2B
+        )
+        await context.send(embed=embed)
 
 async def setup(bot: commands.Bot) -> None:
     await bot.add_cog(Basic(bot))

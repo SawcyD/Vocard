@@ -40,10 +40,9 @@ async def check_access(ctx: commands.Context):
         text = await get_lang(ctx.guild.id, "noPlayer")
         raise voicelink.exceptions.VoicelinkException(text)
 
-    if ctx.author not in player.channel.members:
-        if not ctx.author.guild_permissions.manage_guild:
-            text = await get_lang(ctx.guild.id, "notInChannel")
-            raise voicelink.exceptions.VoicelinkException(text.format(ctx.author.mention, player.channel.mention))
+    if ctx.author not in player.channel.members and not ctx.author.guild_permissions.manage_guild:
+        text = await get_lang(ctx.guild.id, "notInChannel")
+        raise voicelink.exceptions.VoicelinkException(text.format(ctx.author.mention, player.channel.mention))
 
     return player
 
@@ -53,12 +52,21 @@ class Effect(commands.Cog):
         self.description = "This category is only available to DJ on this server. (You can setdj on your server by /settings setdj <DJ ROLE>)"
 
     async def effect_autocomplete(self, interaction: discord.Interaction, current: str) -> list:
-        player: voicelink.Player = interaction.guild.voice_client
-        if not player:
+        if player := interaction.guild.voice_client:
+            return (
+                [
+                    app_commands.Choice(name=effect.tag, value=effect.tag)
+                    for effect in player.filters.get_filters()
+                    if current in effect.tag
+                ]
+                if current
+                else [
+                    app_commands.Choice(name=effect.tag, value=effect.tag)
+                    for effect in player.filters.get_filters()
+                ]
+            )
+        else:
             return []
-        if current:
-            return [app_commands.Choice(name=effect.tag, value=effect.tag) for effect in player.filters.get_filters() if current in effect.tag]
-        return [app_commands.Choice(name=effect.tag, value=effect.tag) for effect in player.filters.get_filters()]
 
     @commands.hybrid_command(name="speed", aliases=get_aliases("speed"))
     @app_commands.describe(value="The value to set the speed to. Default is `1.0`")

@@ -130,22 +130,30 @@ class Skip(ControlButton):
         )
     
     async def callback(self, interaction: discord.Interaction):
+        privileged_roles = [1212272788967129148, 1231487319622811749]  # The role IDs that can bypass checks
+        user_roles = [role.id for role in interaction.user.roles]
+
+        # Check if the user has any of the privileged roles
+        has_privileged_role = any(role in user_roles for role in privileged_roles)
+
         if not self.player.is_playing:
-            return 
-        if not self.player.is_privileged(interaction.user):
-            if interaction.user == self.player.current.requester:
-                pass 
-            elif interaction.user in self.player.skip_votes:
-                return await self.send(interaction, "voted", ephemeral=True)
-            else:
-                self.player.skip_votes.add(interaction.user)
-                if len(self.player.skip_votes) >= (required := self.player.required()):
-                    pass
-                else:
-                    return await self.send(interaction, "skipVote", interaction.user, len(self.player.skip_votes), required)
+            return await self.send(interaction, "noPlayer", ephemeral=True)
 
+        # If the user has a privileged role, or is the requester, let them skip without voting
+        if has_privileged_role or interaction.user == self.player.current.requester:
+            pass
+        elif interaction.user in self.player.skip_votes:
+            return await self.send(interaction, "voted", ephemeral=True)
+        else:
+            # Add a vote to skip from the user
+            self.player.skip_votes.add(interaction.user)
+            required_votes = self.player.required()
+            if len(self.player.skip_votes) < required_votes:
+                # Not enough votes, let the user know their vote has been counted
+                return await self.send(interaction, "skipVote", interaction.user, len(self.player.skip_votes), required_votes)
+
+        # Skip logic
         await self.send(interaction, "skipped", interaction.user)
-
         if self.player.queue._repeat.mode == voicelink.LoopType.track:
             await self.player.set_repeat(voicelink.LoopType.off.name)
         await self.player.stop()
@@ -162,13 +170,12 @@ class Stop(ControlButton):
         if not self.player.is_privileged(interaction.user):
             if interaction.user in self.player.stop_votes:
                 return await self.send(interaction, "voted", ephemeral=True)
-            else:
-                self.player.stop_votes.add(interaction.user)
-                if len(self.player.stop_votes) >= (required := self.player.required(leave=True)):
-                    pass
-                else:
-                    return await self.send(interaction, "leaveVote", interaction.user, len(self.player.stop_votes), required)
-        
+            self.player.stop_votes.add(interaction.user)
+            if len(self.player.stop_votes) < (
+                required := self.player.required(leave=True)
+            ):
+                return await self.send(interaction, "leaveVote", interaction.user, len(self.player.stop_votes), required)
+
         await self.send(interaction, "left", interaction.user)
         await self.player.teardown()
 
